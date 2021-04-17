@@ -4,12 +4,12 @@ import pandas as pd
 import torch
 
 from utils import send_inputs_to_gpu
-from src.v1 import PARAMS
+from params import PARAMS
 
 
 @torch.no_grad()
 def inference(model, data_loader):
-    save_path = "/opt/ml/project/src/v1/result"
+    save_path = "/opt/ml/project/result"
     result = []
     Path(save_path).mkdir(parents=True, exist_ok=True)
     model.eval()

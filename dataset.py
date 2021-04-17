@@ -44,15 +44,15 @@ class RelationDataset(Dataset):
             sent = df.loc[idx, "col1"]
             sent = list(sent)
             if row["col3"] < row["col6"]:
-                sent.insert(df.loc[idx, "col7"] + 1, "[/ENT]")
-                sent.insert(df.loc[idx, "col6"], "[ENT]")
-                sent.insert(df.loc[idx, "col4"] + 1, "[/ENT]")
-                sent.insert(df.loc[idx, "col3"], "[ENT]")
+                sent.insert(df.loc[idx, "col7"] + 1, " [/ENT] ")
+                sent.insert(df.loc[idx, "col6"], " [ENT] ")
+                sent.insert(df.loc[idx, "col4"] + 1, " [/ENT] ")
+                sent.insert(df.loc[idx, "col3"], " [ENT] ")
             else:
-                sent.insert(df.loc[idx, "col4"] + 1, "[/ENT]")
-                sent.insert(df.loc[idx, "col3"], "[ENT]")
-                sent.insert(df.loc[idx, "col7"] + 1, "[/ENT]")
-                sent.insert(df.loc[idx, "col6"], "[ENT]")
+                sent.insert(df.loc[idx, "col4"] + 1, " [/ENT] ")
+                sent.insert(df.loc[idx, "col3"], " [ENT] ")
+                sent.insert(df.loc[idx, "col7"] + 1, " [/ENT] ")
+                sent.insert(df.loc[idx, "col6"], " [ENT] ")
             df.loc[idx, "col1"] = "".join(sent)
         return
 
@@ -63,10 +63,11 @@ class RelationDataset(Dataset):
     def get_entity_indices(self, input_ids):
         entity_indices = []
         entity_id = self.tokenizer.convert_tokens_to_ids("[ENT]")
+        padding_id = self.tokenizer.convert_tokens_to_ids("[PAD]")
         for idx, input_id in enumerate(input_ids):
             if input_id == entity_id:
                 entity_indices.append(idx)
-            elif input_ids == 0:
+            elif input_ids == padding_id:
                 break
         return entity_indices
 

@@ -52,7 +52,7 @@ def evaluate(model, criterion, val_loader):
     model.eval()
     for inputs in val_loader:
         (input_ids, token_type_ids, attention_mask,
-         entity_indices, labels) = _send_to_gpu(inputs)
+         entity_indices, labels) = send_inputs_to_gpu(inputs)
         outputs = model(input_ids=input_ids,
                         token_type_ids=token_type_ids,
                         attention_mask=attention_mask,
