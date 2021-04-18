@@ -22,13 +22,15 @@ class RelationDataset(Dataset):
 
     def __getitem__(self, index):
         data = self.tokenizer(self.data.loc[index, "col1"], padding="max_length", max_length=self.max_length)
-        entity_indices = self.get_entity_indices(data["input_ids"])
+        entity_token_indices = self.get_entity_token_indices(data["input_ids"])
+        entity_ids = self.get_entity_ids(data["input_ids"])
         if self.train:
             label = torch.tensor(self.data.loc[index, "label"], dtype=torch.long)
         else:
             label = torch.tensor(0)
         return (torch.tensor(data["input_ids"]), torch.tensor(data["token_type_ids"]),
-                torch.tensor(data["attention_mask"]), torch.tensor(entity_indices), label)
+                torch.tensor(data["attention_mask"]), torch.tensor(entity_token_indices),
+                torch.tensor(entity_ids), label)
 
     def get_data(self):
         path = self.train_file if self.train else self.test_file
@@ -60,16 +62,35 @@ class RelationDataset(Dataset):
         with open(self.label_dict_file, "rb") as f:
             return pickle.load(f)
 
-    def get_entity_indices(self, input_ids):
-        entity_indices = []
-        entity_id = self.tokenizer.convert_tokens_to_ids("[ENT]")
+    def get_entity_token_indices(self, input_ids):
+        entity_token_indices = []
+        entity_token_ids = [self.tokenizer.convert_tokens_to_ids("[ENT]"),
+                            self.tokenizer.convert_tokens_to_ids("[/ENT]")]
         padding_id = self.tokenizer.convert_tokens_to_ids("[PAD]")
         for idx, input_id in enumerate(input_ids):
-            if input_id == entity_id:
-                entity_indices.append(idx)
+            if input_id in entity_token_ids:
+                entity_token_indices.append(idx)
             elif input_ids == padding_id:
                 break
-        return entity_indices
+        return entity_token_indices
+
+    def get_entity_ids(self, input_ids):
+        entity_ids = [0] * len(input_ids)
+        entity_open_id = self.tokenizer.convert_tokens_to_ids("[ENT]")
+        entity_close_id = self.tokenizer.convert_tokens_to_ids("[/ENT]")
+        padding_id = self.tokenizer.convert_tokens_to_ids("[PAD]")
+        flag = False
+        for idx, input_id in enumerate(input_ids):
+            if input_id == entity_open_id:
+                flag = True
+            elif input_id == entity_close_id:
+                flag = False
+                entity_ids[idx] = 1
+            elif input_ids == padding_id:
+                break
+            if flag:
+                entity_ids[idx] = 1
+        return entity_ids
 
 
 def k_fold_dataset(dataset, k=5, random_state=1818):

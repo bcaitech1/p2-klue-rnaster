@@ -7,7 +7,7 @@ import wandb
 import torch
 from torch.utils.data import DataLoader
 
-from model import get_model_and_tokenizer
+from model import get_model_and_tokenizer, get_optimizer
 from dataset import RelationDataset, k_fold_dataset
 from loss import get_criterion
 from train import train
@@ -15,16 +15,9 @@ from params import PARAMS
 from inference import inference
 
 
-def get_optimizer(model):
-    optimizer = torch.optim.Adam([
-        {"params": model.backbone.parameters(), "lr": PARAMS["config"]["f-lr"]},
-        {"params": model.fc.parameters(), "lr": PARAMS["config"]["lr"]}
-    ], lr=0)
-    return optimizer
-
-
-def main(mode, k_fold=False):
-    model, tokenizer = get_model_and_tokenizer(PARAMS["config"]["model"])
+def main(mode="test", k_fold=False):
+    model, tokenizer = get_model_and_tokenizer(PARAMS["config"]["model"],
+                                               PARAMS["config"]["add_relation_embeddings"])
     optimizer = get_optimizer(model)
     criterion = get_criterion(PARAMS["config"]["criterion"])
     dataset = RelationDataset(tokenizer, PARAMS["config"]["max_length"])

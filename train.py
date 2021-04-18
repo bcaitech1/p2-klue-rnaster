@@ -11,12 +11,7 @@ def train(model, optimizer, criterion, epoch, train_loader,
         for inputs in train_loader:
             model.train()
             optimizer.zero_grad()
-            (input_ids, token_type_ids, attention_mask,
-             entity_indices, labels) = send_inputs_to_gpu(inputs)
-            outputs = model(input_ids=input_ids,
-                            token_type_ids=token_type_ids,
-                            attention_mask=attention_mask,
-                            entity_indices=entity_indices)
+            outputs, labels = _get_outputs_and_labels(model, inputs)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -51,12 +46,7 @@ def evaluate(model, criterion, val_loader):
     step = 0
     model.eval()
     for inputs in val_loader:
-        (input_ids, token_type_ids, attention_mask,
-         entity_indices, labels) = send_inputs_to_gpu(inputs)
-        outputs = model(input_ids=input_ids,
-                        token_type_ids=token_type_ids,
-                        attention_mask=attention_mask,
-                        entity_indices=entity_indices)
+        outputs, labels = _get_outputs_and_labels(model, inputs)
         loss = criterion(outputs, labels)
         val_loss += loss.item()
         acc, f1 = get_accuracy_and_f1(outputs, labels)
@@ -64,3 +54,13 @@ def evaluate(model, criterion, val_loader):
         val_f1 += f1
         step += 1
     return val_loss / step, val_acc / step, val_f1 / step
+
+
+def _get_outputs_and_labels(model, inputs):
+    (input_ids, token_type_ids, attention_mask,
+     entity_token_indices, entity_ids, labels) = send_inputs_to_gpu(inputs)
+    return model(input_ids=input_ids,
+                 token_type_ids=token_type_ids,
+                 attention_mask=attention_mask,
+                 entity_token_indices=entity_token_indices,
+                 entity_ids=entity_ids), labels
