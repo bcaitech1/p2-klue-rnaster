@@ -1,53 +1,64 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer
-from transformers.models.electra.modeling_electra import ElectraEmbeddings, ElectraModel
-from transformers.models.bert.modeling_bert import BertEmbeddings, BertModel
-from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
-from kobert.pytorch_kobert import get_pytorch_kobert_model
 from gluonnlp.data import SentencepieceTokenizer
+from kobert.pytorch_kobert import get_pytorch_kobert_model
 from kobert.utils import get_tokenizer
+from transformers import AutoModel, AutoTokenizer
+from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
+from transformers.models.bert.modeling_bert import BertEmbeddings, BertModel
+from transformers.models.electra.modeling_electra import ElectraEmbeddings, ElectraModel
 
-from params import PARAMS
 from utils import fix_random_state
 
 
-def get_model_and_tokenizer(model_name, add_relation_embeddings=False):
+def get_model_and_tokenizer(config):
     fix_random_state()
-    if model_name in ["bert-base-multilingual-cased", "monologg/koelectra-base-v3-discriminator"]:
+    model_name = config["model"]
+    add_entity_embeddings = config["add_entity_embeddings"]
+    tokenizer_version = config["tokenizer"]
+    if config["type"] == "transformers":
         backbone = AutoModel.from_pretrained(model_name)
-        if "electra" in model_name and add_relation_embeddings:
+        if "electra" in model_name and add_entity_embeddings:
             backbone = ElectraRelationModel(backbone)
-        if "bert" in model_name and add_relation_embeddings:
+        if "bert" in model_name and add_entity_embeddings:
             backbone = BertRelationModel(backbone)
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        tokenizer.add_special_tokens({"additional_special_tokens": ["[ENT]", "[/ENT]"]})
+        if tokenizer_version == "v1":
+            tokenizer.add_special_tokens({"additional_special_tokens": ["[ENT]", "[/ENT]"]})
+        elif tokenizer_version == "v2":
+            tokenizer.add_special_tokens({"additional_special_tokens": ["[E1]", "[/E1]", "[E2]", "[/E2]"]})
+        else:
+            raise ValueError("incorrect tokenizer version: %s" % tokenizer_version)
     elif model_name == "KoBERT":
         backbone, vocab = get_pytorch_kobert_model()
-        if add_relation_embeddings:
+        if add_entity_embeddings:
             backbone = BertRelationModel(backbone)
         tok_path = get_tokenizer()
         spt = SentencepieceTokenizer(tok_path)
-        tokenizer = Tokenizer(vocab, spt, max_length=PARAMS["config"]["max_length"])
+        tokenizer = get_kobert_tokenizer(tokenizer_version, vocab, spt,
+                                         config["max_length"])
     else:
         raise ValueError("incorrect model_name: %s" % model_name)
-    backbone = add_word_embedding_vector(backbone)
-    return RelationModel(backbone, add_relation_embeddings), tokenizer
+    backbone.resize_token_embeddings(len(tokenizer))
+    return RelationModel(backbone), tokenizer
 
 
-def get_optimizer(model):
+def get_optimizer(model, config):
+    f_lr = config["f-lr"]
+    lr = config["lr"]
     optimizer = torch.optim.Adam([
         {"params": [param for name, param in model.backbone.named_parameters()
                     if "relation_embeddings" not in name],
-         "lr": PARAMS["config"]["f-lr"]},
+         "lr": f_lr},
         {"params": [param for name, param in model.backbone.named_parameters()
                     if "relation_embeddings" in name],
-         "lr": PARAMS["config"]["lr"]},
-        {"params": model.fc.parameters(), "lr": PARAMS["config"]["lr"]}
+         "lr": lr},
+        {"params": model.fc.parameters(), "lr": lr}
     ], lr=0)
     return optimizer
 
 
+# legacy
 def add_word_embedding_vector(model, num=2):
     model.embeddings.word_embeddings.weight = nn.Parameter(
         torch.cat((model.embeddings.word_embeddings.weight,
@@ -57,59 +68,77 @@ def add_word_embedding_vector(model, num=2):
     return model
 
 
+def get_kobert_tokenizer(version, vocab, spt, max_length=400):
+    if version == "v1":
+        return Tokenizer(vocab, spt, max_length)
+    if version == "v2":
+        return TokenizerV2(vocab, spt, max_length)
+    raise ValueError("incorrect kobert tokenizer version: %s" % version)
+
+
 class Tokenizer:
     def __init__(self, vocab, spt, max_length=400):
         self.vocab = vocab
         self.spt = spt
         self.max_length = max_length
-        self.entity_tokens = ["[ENT]", "[/ENT]"]
-        self.open_entity_id = len(vocab) + 1
-        self.closed_entity_id = len(vocab) + 2
+        _entity_tokens = ["[ENT]", "[/ENT]"]
+        self.entity_tokens = {token: len(vocab) + i
+                              for i, token in enumerate(_entity_tokens)}
+        self.idx_to_token = self.vocab.idx_to_token
+        self.idx_to_token.extend(_entity_tokens)
 
     def __len__(self):
-        return len(self.vocab) + 2
+        return len(self.idx_to_token)
 
     def __call__(self, sent, **kwargs):
+        padding_id = self.vocab("[PAD]")
         input_ids = self.encode(sent)
         attention_mask = [1] * len(input_ids) + [0] * (self.max_length - len(input_ids))
-        input_ids.extend([1] * (self.max_length - len(input_ids)))
+        input_ids.extend([padding_id] * (self.max_length - len(input_ids)))
         token_type_ids = [0] * self.max_length
-        return {"input_ids": input_ids,
-                "token_type_ids": token_type_ids,
-                "attention_mask": attention_mask}
+        inputs = {"input_ids": input_ids,
+                  "token_type_ids": token_type_ids,
+                  "attention_mask": attention_mask}
+        if kwargs.get("return_tensors", None) == "pt":
+            return {key: torch.tensor(val) for key, val in inputs.items()}
+        return inputs
 
     def encode(self, sent):
         input_ids = [self.vocab("[CLS]")]
         for s in sent.split():
-            if s == "[ENT]":
-                input_ids.append(8002)
-            elif s == "[/ENT]":
-                input_ids.append(8003)
+            if s in self.entity_tokens:
+                input_ids.append(self.entity_tokens[s])
             else:
                 input_ids.extend(self.vocab(self.spt(s)))
         input_ids.append(self.vocab("[SEP]"))
         return input_ids
 
     def convert_tokens_to_ids(self, token):
-        if token == "[ENT]":
-            return self.open_entity_id
-        if token == "[/ENT]":
-            return self.closed_entity_id
+        if token in self.entity_tokens:
+            return self.entity_tokens[token]
         return self.vocab(token)
 
     def decode(self, input_ids: [int, list]):
+        padding_id = self.vocab("[PAD]")
         if isinstance(input_ids, (list, tuple)):
             tokens = []
             for input_id in input_ids:
-                if input_id == 1: break
-                if input_id == 8002:
-                    tokens.append(" [ENT]")
-                elif input_id == 8003:
-                    tokens.append(" [/ENT]")
+                if input_id == padding_id:
+                    break
                 else:
-                    tokens.append(self.vocab.idx_to_token[input_id])
+                    tokens.append(self.idx_to_token[input_id])
             return "".join(tokens).replace("▁", " ").strip()
-        return self.vocab.idx_to_token[input_ids]
+        return self.idx_to_token[input_ids]
+
+
+class TokenizerV2(Tokenizer):
+    def __init__(self, vocab, spt, max_length=400):
+        super().__init__(vocab, spt, max_length)
+        _entity_tokens = ["[E1]", "[/E1]", "[E2]", "[/E2]"]
+        self.entity_tokens = {token: len(vocab) + i
+                              for i, token in enumerate(_entity_tokens)}
+        self.idx_to_token = self.vocab.idx_to_token
+        self.idx_to_token.extend(_entity_tokens)
 
 
 class BertRelationEmbeddings(BertEmbeddings):
@@ -355,24 +384,22 @@ class ElectraRelationModel(ElectraModel):
 
 
 class RelationModel(nn.Module):
-    def __init__(self, backbone, add_relation_embeddings=False):
+    def __init__(self, backbone):
         super().__init__()
         self.backbone = backbone
-        self.fc = nn.Linear(768 * 4, 42)
-        self.add_relation_embeddings = add_relation_embeddings
+        hidden_size = backbone.config.hidden_size
+        self.fc = nn.Linear(hidden_size * 2, 42)
 
     def forward(self, *args, **kwargs):
         entity_token_indices = kwargs.pop("entity_token_indices", None)
-        if not self.add_relation_embeddings:
-            kwargs.pop("entity_ids", None)
         result = self.backbone(*args, **kwargs)
         outputs = result.last_hidden_state
         outputs = self.get_relation_output(outputs, entity_token_indices)
         return self.fc(outputs)
 
-    def get_relation_output(self, outputs, entity_indices):
+    def get_relation_output(self, outputs, entity_token_indices):
         entity_vectors = []
-        for i in range(entity_indices.size(0)):
-            output = torch.index_select(outputs[i], 0, entity_indices[i]).reshape(1, -1)
+        for i in range(entity_token_indices.size(0)):
+            output = torch.index_select(outputs[i], 0, entity_token_indices[i]).reshape(1, -1)
             entity_vectors.append(output)
         return torch.cat(entity_vectors)

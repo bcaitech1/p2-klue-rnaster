@@ -10,7 +10,3 @@ def fix_random_state(random_seed=1818):
     np.random.seed(random_seed)
     random.seed(random_seed)
     return
-
-
-def send_inputs_to_gpu(inputs):
-    return [inp.cuda() for inp in inputs]

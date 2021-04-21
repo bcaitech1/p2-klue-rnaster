@@ -15,7 +15,7 @@ def get_criterion(name="ce", **kwargs):
 
 class FocalLoss(nn.Module):
     def __init__(self, weight=None,
-                 gamma=2., reduction='mean'):
+                 gamma=2., reduction='mean', **kwargs):
         nn.Module.__init__(self)
         self.weight = weight
         self.gamma = gamma
@@ -33,7 +33,7 @@ class FocalLoss(nn.Module):
 
 
 class LabelSmoothing(nn.Module):
-    def __init__(self, classes=18, smoothing=0.1, dim=-1):
+    def __init__(self, classes=42, smoothing=0.1, dim=-1, **kwargs):
         super(LabelSmoothing, self).__init__()
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
