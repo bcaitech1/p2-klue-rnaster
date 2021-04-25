@@ -95,7 +95,7 @@ class EntityDatasetV2(EntityDataset):
                           entity_close_token_indices.tolist()):
             for i in range(op, cl + 1):
                 entity_ids[i] = 1
-        return entity_ids
+        return torch.tensor(entity_ids)
 
 
 class EntityDatasetV3(EntityDataset):
